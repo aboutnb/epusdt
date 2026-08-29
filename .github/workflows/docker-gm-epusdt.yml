@@ -8,17 +8,17 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 concurrency:
   group: docker-gm-epusdt
   cancel-in-progress: true
 
 env:
-  DOCKERHUB_NAMESPACE: gmwallet
-  IMAGE_NAME: epusdt
+  IMAGE_NAME: ghcr.io/aboutnb/epusdt
 
 jobs:
-  push-docker-hub:
+  push-ghcr:
     runs-on: ubuntu-latest
 
     steps:
@@ -42,11 +42,12 @@ jobs:
             type=raw,value=gm-epusdt
             type=sha,prefix=gm-epusdt-sha-,format=short
 
-      - name: Log in to Docker Hub
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
