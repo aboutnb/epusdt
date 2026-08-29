@@ -1,0 +1,62 @@
+name: docker-gm-epusdt
+
+on:
+  push:
+    branches:
+      - gm-epusdt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-gm-epusdt
+  cancel-in-progress: true
+
+env:
+  DOCKERHUB_NAMESPACE: gmwallet
+  IMAGE_NAME: epusdt
+
+jobs:
+  push-docker-hub:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out gm-epusdt
+        uses: actions/checkout@v6
+        with:
+          ref: gm-epusdt
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=gm-epusdt
+            type=sha,prefix=gm-epusdt-sha-,format=short
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            API_RATE_URL=${{ vars.API_RATE_URL }}
+            BUILD_VERSION=gm-epusdt-${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
