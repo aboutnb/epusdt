@@ -280,6 +280,110 @@ func TestRootPostRoute(t *testing.T) {
 	}
 }
 
+func TestEPayQueryOrderReturnsSignedPaymentEvidence(t *testing.T) {
+	e := setupTestEnv(t)
+	orderID := "epay-query-paid-001"
+	tradeID := mustCreateEPayOrder(t, e, orderID, "https://93.184.216.34/return", url.Values{
+		"type": {"usdt.tron"},
+	})
+	const txHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	if err := dao.Mdb.Model(&mdb.Orders{}).Where("trade_id = ?", tradeID).Updates(map[string]interface{}{
+		"status":               mdb.StatusPaySuccess,
+		"block_transaction_id": txHash,
+	}).Error; err != nil {
+		t.Fatalf("mark query fixture paid: %v", err)
+	}
+
+	rec := doFormPost(e, "/payments/epay/v1/order/create-transaction/api.php", url.Values{
+		"act":          {"order"},
+		"pid":          {"1"},
+		"key":          {testAPIToken},
+		"out_trade_no": {orderID},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("query status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode query response: %v", err)
+	}
+	for key, want := range map[string]string{
+		"pid":                  "1",
+		"out_trade_no":         orderID,
+		"trade_no":             tradeID,
+		"type":                 "usdt.tron",
+		"money":                "1.0000",
+		"trade_status":         "TRADE_SUCCESS",
+		"block_transaction_id": txHash,
+		"sign_type":            "MD5",
+	} {
+		if got := fmt.Sprint(body[key]); got != want {
+			t.Fatalf("response[%s] = %q, want %q", key, got, want)
+		}
+	}
+	if got := int(body["code"].(float64)); got != 1 {
+		t.Fatalf("code = %d, want 1", got)
+	}
+	if got := int(body["status"].(float64)); got != 1 {
+		t.Fatalf("status = %d, want 1", got)
+	}
+
+	signature := fmt.Sprint(body["sign"])
+	delete(body, "sign")
+	delete(body, "sign_type")
+	wantSignature, err := sign.Get(body, testAPIToken)
+	if err != nil {
+		t.Fatalf("sign query response: %v", err)
+	}
+	if signature != wantSignature {
+		t.Fatalf("response signature = %q, want %q", signature, wantSignature)
+	}
+}
+
+func TestEPayQueryOrderRejectsInvalidCredentialsAndDuplicateFields(t *testing.T) {
+	e := setupTestEnv(t)
+	orderID := "epay-query-auth-001"
+	mustCreateEPayOrder(t, e, orderID, "https://93.184.216.34/return", nil)
+
+	tests := []struct {
+		name string
+		form url.Values
+	}{
+		{
+			name: "wrong key",
+			form: url.Values{"act": {"order"}, "pid": {"1"}, "key": {"wrong"}, "out_trade_no": {orderID}},
+		},
+		{
+			name: "duplicate pid",
+			form: url.Values{"act": {"order"}, "pid": {"1", "2"}, "key": {testAPIToken}, "out_trade_no": {orderID}},
+		},
+		{
+			name: "unknown field",
+			form: url.Values{"act": {"order"}, "pid": {"1"}, "key": {testAPIToken}, "out_trade_no": {orderID}, "return_url": {"https://example.com"}},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := doFormPost(e, "/payments/epay/v1/order/create-transaction/api.php", tc.form)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+			}
+			var body map[string]interface{}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if got := int(body["code"].(float64)); got != 0 {
+				t.Fatalf("code = %d, want 0", got)
+			}
+			if _, exists := body["trade_no"]; exists {
+				t.Fatal("failed query disclosed trade_no")
+			}
+		})
+	}
+}
+
 // TestCreateOrderGmpayV1Solana tests the gmpay route with solana network.
 func TestCreateOrderGmpayV1Solana(t *testing.T) {
 	e := setupTestEnv(t)

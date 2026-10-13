@@ -228,6 +228,7 @@ func RegisterRoute(e *echo.Echo) {
 
 		return comm.Ctrl.CreateTransactionAndRedirect(ctx)
 	})
+	epayV1.Match([]string{http.MethodPost, http.MethodGet}, "/order/create-transaction/api.php", comm.Ctrl.QueryEPayOrder)
 
 	registerAdminRoutes(e)
 }

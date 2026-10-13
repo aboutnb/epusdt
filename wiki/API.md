@@ -15,6 +15,7 @@
 | 查询支付状态 | GET | `/pay/check-status/{trade_id}` | 否 |
 | 切换支付网络/通道 | POST | `/pay/switch-network` | 否 |
 | EPay 兼容创建交易 | GET/POST | `/payments/epay/v1/order/create-transaction/submit.php` | 是 |
+| EPay 兼容查单 | GET/POST | `/payments/epay/v1/order/create-transaction/api.php` | PID + 商户密钥 |
 | OkPay 平台回调 | POST | `/payments/okpay/v1/notify` | OkPay 签名 |
 
 ## 统一响应格式
@@ -480,6 +481,46 @@ EPay 接口解析 `type/token/network/currency` 的规则：
 - 服务端会在 EPay 签名校验通过后内部注入 `payment_type=Epay`，该字段不参与 EPay 入站签名；但请求里显式传入的 `type/token/network/currency` 仍属于原始 EPay 参数，必须参与签名。
 
 后台默认配置可通过 `/payments/gmpay/v1/config` 的 `epay` 字段查看；新安装默认只预置 `epay.default_currency=cny`，`epay.default_token` 和 `epay.default_network` 为空，因此 EPay 未显式传 token/network 时会创建状态 `4` 占位订单。已有数据库的配置不会被 seed 覆盖，删除或置空 `epay.default_token` 和 `epay.default_network` 后，这两个字段会返回空字符串。
+
+## EPay 兼容查单
+
+`GET /payments/epay/v1/order/create-transaction/api.php`
+
+`POST /payments/epay/v1/order/create-transaction/api.php`
+
+该接口用于商户服务端在收到回调后主动核对订单。请求必须使用 HTTPS；`key` 是 PID 对应的完整商户密钥，不应出现在浏览器、前端日志或 URL 中，生产接入应使用 POST form。
+
+### 请求参数
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `act` | string | 是 | 固定为 `order`。 |
+| `pid` | string | 是 | 订单所属商户 PID。 |
+| `key` | string | 是 | PID 对应的商户密钥。 |
+| `out_trade_no` | string | 是 | 商户订单号。 |
+
+接口拒绝重复参数和未知参数，并校验 API Key 的 IP 白名单及订单归属。失败返回 `code=0`，不会返回订单详情。
+
+支付成功响应示例：
+
+```json
+{
+  "code": 1,
+  "msg": "success",
+  "pid": "1000",
+  "out_trade_no": "ORD202605230001",
+  "trade_no": "20260523171652123456001",
+  "type": "usdt.tron",
+  "money": "100.0000",
+  "trade_status": "TRADE_SUCCESS",
+  "status": 1,
+  "block_transaction_id": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "sign": "a1b2c3d4...",
+  "sign_type": "MD5"
+}
+```
+
+未支付订单返回 `trade_status=WAITING`、`status=0`，且 `block_transaction_id` 为空。响应签名排除 `sign` 和 `sign_type`，其余非空字段按 ASCII 字典序拼接后追加商户密钥并计算 MD5。商户必须同时核对签名、PID、商户订单号、平台交易号、支付类型、金额、支付状态和链上交易哈希，不能只依据 `status` 入账。
 
 ## 商户异步回调
 
